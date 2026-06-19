@@ -29,15 +29,21 @@ if stock_data.empty:
 
 stock_data["MA"] = stock_data["Close"].rolling(window=20).mean()
 
+ticker = yf.Ticker(ticker_symbol)
+
 # Initialise tabs
 tabs = st.tabs(["Raw Data", "Price Chart", "Moving Average", "Volume Chart", "Dividends and Splits"])
 
-ticker = yf.Ticker(ticker_symbol)
 
 with tabs[0]:
     st.subheader("Raw Stock Data")
     st.dataframe(stock_data.tail(10))
-    st.button("Download Data as CSV", on_click=lambda: st.download_button(label="Download CSV", data=stock_data.to_csv(), file_name=f"{ticker_symbol}_data.csv", mime="text/csv"))
+    st.download_button(
+        label="Download CSV", 
+        data=stock_data.to_csv(), 
+        file_name=f"{ticker_symbol}_data.csv", 
+        mime="text/csv"
+    )
 with tabs[1]:
     st.subheader("Stock Price Chart")
     plt.figure(figsize=(10, 5))
@@ -57,20 +63,48 @@ with tabs[2]:
     plt.ylabel("Price")
     plt.legend()
     st.pyplot(plt)
+
 with tabs[3]:
     st.subheader("Volume Chart")
     plt.figure(figsize=(10, 5))
-    plt.bar(stock_data.index, stock_data["Volume"], label="Volume", color="green")
+    
+    # 1. Ensure the index is a flat 1D array of datetimes
+    plot_index = stock_data.index.to_numpy()
+    
+    # 2. Extract Volume safely, flattening it to 1D even if it's a MultiIndex DataFrame
+    if isinstance(stock_data["Volume"], pd.DataFrame):
+        plot_volume = stock_data["Volume"].iloc[:, 0].to_numpy()
+    else:
+        plot_volume = stock_data["Volume"].to_numpy()
+        
+    # 3. Explicitly set width to stop Matplotlib from guessing based on the array
+    plt.bar(plot_index, plot_volume, width=0.8, label="Volume", color="green")
+    
     plt.title(f"{ticker_symbol} Trading Volume")
     plt.xlabel("Date")
     plt.ylabel("Volume")
     plt.legend()
     st.pyplot(plt)
+    plt.clf()  # Clear figure for safety
+
 with tabs[4]:
     st.subheader("Dividends and Splits")
+    
+    # yfinance history handles dividends/splits cleanly, but let's make sure they display nicely
     dividends = ticker.dividends
+    dividends = dividends[str(start_date):str(end_date)]  # Filter dividends by date range
+
     splits = ticker.splits
-    st.write("Dividends:")
-    st.dataframe(dividends)
-    st.write("Splits:")
-    st.dataframe(splits)
+    splits = splits[str(start_date):str(end_date)]  # Filter splits by date range
+
+    st.write("### Dividends:")
+    if not dividends.empty:
+        st.dataframe(dividends)
+    else:
+        st.info("No recent dividend data found for this ticker.")
+        
+    st.write("### Splits:")
+    if not splits.empty:
+        st.dataframe(splits)
+    else:
+        st.info("No recent stock split data found for this ticker.")
