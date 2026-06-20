@@ -1,4 +1,5 @@
 # Download rrequired libraries
+import sqlite3
 import yfinance as yf
 import matplotlib.pyplot as plt
 import numpy as np
@@ -11,7 +12,7 @@ def fetch_stock_data(ticker, start_date, end_date):
     stock_data = yf.download(ticker, start=start_date, end=end_date)
     return stock_data
 
-
+# Initalize standard page configuration
 st.title("Stock Price Visualization")
 
 # Side Bar for User Input
@@ -27,12 +28,84 @@ if stock_data.empty:
     st.write("No data found for the given ticker and date range.")
     st.stop()
 
-stock_data["MA"] = stock_data["Close"].rolling(window=20).mean()
 
 ticker = yf.Ticker(ticker_symbol)
 
 # Initialise tabs
 tabs = st.tabs(["Raw Data", "Price Chart", "Moving Average", "Volume Chart", "Dividends and Splits"])
+
+if "tracked_tickers" not in st.session_state:
+    try:
+        conn = sqlite3.connect("stock_data.db")
+        # Grab only unique ticker names from the database
+        df = pd.read_sql("SELECT DISTINCT Ticker FROM historical_prices", conn)
+        st.session_state.tracked_tickers = df["Ticker"].tolist()
+        conn.close()
+    except Exception:
+        # If the database or table doesn't exist yet, start with an empty list
+        st.session_state.tracked_tickers = []
+
+
+st.sidebar.title("🗄️ Database Ticker Manager")
+
+# Input field to fetch a brand-new ticker
+new_ticker = st.sidebar.text_input("Search New Ticker:", value="").upper()
+
+# If you have saved tickers, show them in a dropdown menu
+selected_ticker = None
+if st.session_state.tracked_tickers:
+    st.sidebar.markdown("### Saved Stocks")
+    
+    # Dropdown menu containing all previously saved tickers
+    selected_ticker = st.sidebar.selectbox(
+        "Load a saved stock:", 
+        options=["Select a stock..."] + st.session_state.tracked_tickers
+    )
+    
+    # --- DELETE MECHANISM ---
+    st.sidebar.markdown("---")
+    ticker_to_delete = st.sidebar.selectbox("Select stock to delete:", options=st.session_state.tracked_tickers, key="delete_box")
+    
+    if st.sidebar.button("❌ Permanent Delete From DB", type="secondary"):
+        conn = sqlite3.connect("stock_data.db")
+        cursor = conn.cursor()
+        # Delete all rows associated with this ticker
+        cursor.execute("DELETE FROM historical_prices WHERE Ticker = ?", (ticker_to_delete,))
+        conn.commit()
+        conn.close()
+        
+        # Update our active app memory list so the dropdown removes it instantly
+        st.session_state.tracked_tickers.remove(ticker_to_delete)
+        st.sidebar.success(f"Deleted {ticker_to_delete} from local storage!")
+        st.rerun()
+
+# Determine which ticker the main dashboard should actually run
+if new_ticker:
+    ticker_symbol = new_ticker
+elif selected_ticker and selected_ticker != "Select a stock...":
+    ticker_symbol = selected_ticker
+else:
+    ticker_symbol = "AAPL" # Default backup ticker if everything is blank
+
+
+
+    # Check if the requested stock is already sitting in our database
+is_cached = ticker_symbol in st.session_state.tracked_tickers
+
+if is_cached:
+    st.info(f"⚡ Loading {ticker_symbol} instantly from local SQL database...")
+    conn = sqlite3.connect("stock_data.db")
+    # Read data back out of SQL
+    stock_data = pd.read_sql(f"SELECT * FROM historical_prices WHERE Ticker = '{ticker_symbol}'", conn)
+    conn.close()
+    
+    # Reconstruct the index into a proper Datetime format that Matplotlib expects
+    stock_data['Date'] = pd.to_datetime(stock_data['Date'])
+    stock_data.set_index('Date', inplace=True)
+else:
+    st.warning(f"🌐 Fetching {ticker_symbol} live from Yahoo Finance...")
+    ticker = yf.Ticker(ticker_symbol)
+    stock_data = ticker.history(period="1y") # or use your start_date/end_date variables
 
 
 with tabs[0]:
@@ -54,6 +127,8 @@ with tabs[1]:
     plt.legend()
     st.pyplot(plt)
 with tabs[2]:  
+    stock_data["MA"] = stock_data["Close"].rolling(window=20).mean()
+    
     st.subheader("Moving Average (20-day)")
     plt.figure(figsize=(10, 5))
     plt.plot(stock_data.index, stock_data["Close"], label="Close Price")
@@ -108,3 +183,23 @@ with tabs[4]:
         st.dataframe(splits)
     else:
         st.info("No recent stock split data found for this ticker.")
+
+with tabs[6]: # Your Database Control Tab
+    st.subheader("Cache Controls")
+    
+    if st.button("Save Current Ticker Data"):
+        if not stock_data.empty:
+            conn = sqlite3.connect("stock_data.db")
+            db_df = stock_data.copy().reset_index()
+            db_df['Date'] = db_df['Date'].astype(str)
+            db_df['Ticker'] = ticker_symbol
+            
+            db_df.to_sql("historical_prices", conn, if_exists="append", index=False)
+            conn.close()
+            
+            # Update our session memory if it isn't already there
+            if ticker_symbol not in st.session_state.tracked_tickers:
+                st.session_state.tracked_tickers.append(ticker_symbol)
+                
+            st.success(f"Saved {ticker_symbol} to your database cache!")
+            st.rerun()
