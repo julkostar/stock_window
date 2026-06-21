@@ -5,6 +5,9 @@ SQL database creation and querying has been incorporated which can be updated by
 
 To run in powershell:
 .venv\Scripts\Activate.ps1
+
 pip install requirements.txt
+
 streamlit run widget.py
+
 
