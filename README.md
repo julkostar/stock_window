@@ -3,9 +3,8 @@ The applications UI is powered through the streamlit python library while time-s
 
 SQL database creation and querying has been incorporated which can be updated by the user.
 
-To run:
-Open up a venv and run
-
+To run in powershell:
+.venv\Scripts\Activate.ps1
 pip install requirements.txt
 streamlit run widget.py
 
